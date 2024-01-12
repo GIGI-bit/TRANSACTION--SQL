@@ -1,0 +1,93 @@
+--EN : Implement stored procedures for rating comments and posts.
+--AZ : Comment və postlara reytinq vermək üçün stored prosedurlar yazın.
+
+
+--EN : Please note that when a comment is put on the score, you need to recount the rating of the commentary and the rating of the user who wrote this comment.
+--AZ : Nəzərə alın ki , commentə xal verildiyi halda siz commentin və bu commenti yazan userin reytiniqini yenidən hesablamalısınız. Bu elementlər hamısı eyni bir tranzasiyada baş verməlidir.
+
+--EN : Similarly with posts. When an evaluation of the post is made, it is necessary to recalculate the rating of the post and the rating of the user who wrote this post.
+--AZ : Eyni ilə yuxarıda yazılanlar postlara da aiddir.
+
+
+CREATE PROCEDURE AddCommentMark
+	@comid AS int,
+	@userid AS int,
+	@postid AS int,
+	@mark AS int
+AS
+BEGIN
+	BEGIN TRAN CommentMark
+
+	INSERT INTO CommentRating(IdComment, IdUser, Mark)
+	VALUES (@comid, @userid, @mark)
+
+	IF(@@ERROR != 0)
+	BEGIN
+		PRINT 'Error in insert'
+		ROLLBACK TRAN CommentMark
+	END
+	ELSE
+	BEGIN
+
+		PRINT 'Insert ok'
+		UPDATE Comments
+		SET Rating = (
+			SELECT CAST(SUM(Mark) AS float) / COUNT(*)
+			FROM Comments INNER JOIN CommentRating
+			ON Comments.Id = CommentRating.IdComment
+			WHERE  Comments.Id = @comid
+		)
+		WHERE  Comments.Id = @comid
+
+		UPDATE Posts
+		SET Rating = (
+			SELECT CAST(SUM(Mark) AS float) / COUNT(*)
+			FROM Posts INNER JOIN PostRating
+			ON Posts.Id = PostRating.IdPost
+			WHERE  Posts.Id = @postid
+		)
+		WHERE  Posts.Id = @postid
+
+		IF(@@ERROR != 0)
+		BEGIN
+			PRINT 'Error in update'
+			ROLLBACK TRAN CommentMark
+		END
+		ELSE
+		BEGIN
+			PRINT 'update ok'
+			DECLARE @comment float
+			DECLARE @posts float
+			SELECT  @comment=CAST(SUM(Comments.Rating)AS float)/COUNT(*) 
+			FROM Comments
+			INNER JOIN Users ON Users.Id=Comments.IdUser
+			WHERE Users.Id=@userid
+
+
+			SELECT @posts=CAST(SUM(Posts.Rating) AS float)/COUNT(*)
+			FROM Posts
+			INNER JOIN Users ON Posts.IdUser=Users.Id
+			WHERE Users.Id=@userid
+
+			UPDATE Users
+			SET Rating =((@comment+@posts)/2)
+			WHERE Users.Id=@userid
+			
+			IF(@@ERROR !=0)
+				BEGIN
+					PRINT 'Error occurred'
+					ROLLBACK TRAN CommentMark
+				END
+			ELSE
+				BEGIN
+					PRINT 'Process complate'
+					COMMIT CommentMark
+				END
+		END
+
+	END
+
+END
+
+
+
